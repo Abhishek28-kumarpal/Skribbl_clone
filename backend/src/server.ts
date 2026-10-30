@@ -13,7 +13,7 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:5173',
+    origin: process.env.CLIENT_URL || 'https://skribbl-clone-snjs.vercel.app',
     methods: ['GET', 'POST'],
   },
 });
@@ -21,7 +21,7 @@ const io = new Server(httpServer, {
 const roomManager = new RoomManager();
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: process.env.CLIENT_URL || 'https://skribbl-clone-snjs.vercel.app',
   methods: ['GET', 'POST'],
 }));
 app.use(express.json());
