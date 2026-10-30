@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
@@ -10,33 +9,59 @@ import { setupSocketHandlers } from './socket/handlers.js';
 
 dotenv.config();
 
-// Allowed frontend origins
+// Allowed frontend origins - ADD ALL YOUR DEPLOYED URLS
 const allowedOrigins = [
-  'https://skribbl-clone-snjs.vercel.app'
-];
+  'https://skribbl-clone-snjs.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://skribbl-clone-d2z8.onrender.com', // If frontend is also on Render
+  process.env.FRONTEND_URL, // Add from .env
+].filter(Boolean); // Remove undefined values
 
 // Initialize Express
 const app = express();
 const httpServer = createServer(app);
 
-// Socket.IO configuration
+// Socket.IO configuration with proper CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     methods: ['GET', 'POST'],
-    credentials: true
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
   },
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
-// Initialize Room Manager
-const roomManager = new RoomManager();
-
-// Express CORS configuration
+// Express CORS configuration with dynamic origin check
 app.use(cors({
-  origin: allowedOrigins,
-  methods: ['GET', 'POST'],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use(express.json());
 
@@ -82,9 +107,21 @@ app.get('/api/stats', (req, res) => {
 // Setup Socket.IO handlers
 setupSocketHandlers(io, roomManager);
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
 // Start server
 const server = httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT} in ${NODE_ENV} mode`);
+  console.log(`Allowed origins: ${allowedOrigins.join(', ')}`);
 });
 
 // Graceful shutdown
@@ -108,3 +145,5 @@ const gracefulShutdown = () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+
+export { io };
