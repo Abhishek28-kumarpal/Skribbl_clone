@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { getSocket } from '../services/socket';
 import { DrawingCanvas } from '../components/DrawingCanvas';
 import { GameState } from '../types';
@@ -7,57 +7,111 @@ import { GameState } from '../types';
 export const Game: React.FC = () => {
   const { roomCode } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const socket = getSocket();
-  const [gameState, setGameState] = useState<GameState | null>(null);
+
+  // ---- Initialize gameState from navigation state (instant, no flicker) ----
+  const navState = (location.state as any)?.gameState as GameState | undefined;
+  const [gameState, setGameState] = useState<GameState | null>(navState ?? null);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
   const [, setSelectedWord] = useState('');
-  const [timeLeft, setTimeLeft] = useState(0);
+  const [timeLeft, setTimeLeft] = useState<number>(
+    navState?.settings?.drawTime ?? 0
+  );
 
+  // ---- Timer management (fixes interval leaks & stale closures) ----
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const startRoundTimer = (duration: number) => {
+    clearTimer();
+    let remaining = duration;
+    setTimeLeft(remaining);
+
+    timerRef.current = setInterval(() => {
+      remaining--;
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
+        clearTimer();
+      }
+    }, 1000);
+  };
+
+  // ---- Request current game state from server (handles refresh / late mount) ----
   useEffect(() => {
-    socket.on('game_started', (data: any) => {
+    // If we don't already have state (e.g., page refresh), ask the server
+    if (!gameState && roomCode) {
+      socket.emit('get_game_state', { roomCode }, (response: any) => {
+        if (response?.success && response.gameState) {
+          setGameState(response.gameState);
+          const gs: GameState = response.gameState;
+          if (gs.phase === 'drawing' && gs.timeLeft != null) {
+            startRoundTimer(gs.timeLeft);
+          } else if (gs.settings?.drawTime) {
+            setTimeLeft(gs.settings.drawTime);
+          }
+        } else {
+          // No active game — go back to lobby or home
+          navigate(`/lobby/${roomCode}`);
+        }
+      });
+    } else if (gameState && gameState.phase === 'drawing') {
+      // We have state from navigation — start timer if needed
+      const remaining =
+        (gameState as any).timeLeft ?? gameState.settings?.drawTime ?? 0;
+      if (remaining > 0) startRoundTimer(remaining);
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomCode]);
+
+  // ---- Socket listeners ----
+  useEffect(() => {
+    if (!roomCode) return;
+
+    const onGameStarted = (data: any) => {
       setGameState(data.gameState);
       setTimeLeft(data.gameState.settings.drawTime);
-    });
+      startRoundTimer(data.gameState.settings.drawTime);
+    };
 
-    socket.on('word_selected', (data: any) => {
+    const onWordSelected = (data: any) => {
       setGameState(data.gameState);
       setMessages(prev => [...prev, { type: 'system', text: 'Word selected!' }]);
       setTimeLeft(data.gameState.settings.drawTime);
       startRoundTimer(data.gameState.settings.drawTime);
-    });
+    };
 
-    socket.on('draw_data', (data: any) => {
+    const onDrawData = (data: any) => {
       const { stroke } = data;
       setGameState(prev => {
         if (!prev) return prev;
-        return {
-          ...prev,
-          drawingData: [...prev.drawingData, stroke],
-        };
+        return { ...prev, drawingData: [...prev.drawingData, stroke] };
       });
-    });
+    };
 
-    socket.on('canvas_cleared', () => {
-      setGameState(prev => {
-        if (!prev) return prev;
-        return { ...prev, drawingData: [] };
-      });
-    });
+    const onCanvasCleared = () => {
+      setGameState(prev => (prev ? { ...prev, drawingData: [] } : prev));
+    };
 
-    socket.on('stroke_undone', () => {
+    const onStrokeUndone = () => {
       setGameState(prev => {
         if (!prev) return prev;
         const newData = [...prev.drawingData];
         newData.pop();
         return { ...prev, drawingData: newData };
       });
-    });
+    };
 
-    socket.on('correct_guess', (data: any) => {
-      if (data.gameState) {
-        setGameState(data.gameState);
-      }
+    const onCorrectGuess = (data: any) => {
+      if (data.gameState) setGameState(data.gameState);
       setMessages(prev => [
         ...prev,
         {
@@ -66,9 +120,10 @@ export const Game: React.FC = () => {
           word: data.word,
         },
       ]);
-    });
+    };
 
-    socket.on('round_end', (data: any) => {
+    const onRoundEnd = (data: any) => {
+      clearTimer();
       setGameState(data.gameState);
       setMessages(prev => [
         ...prev,
@@ -77,42 +132,41 @@ export const Game: React.FC = () => {
           text: `Round ended. Word was: ${data.gameState.currentWord}`,
         },
       ]);
-      setTimeout(() => handleEndRound(), 2000);
-    });
+      // Let the server drive the next round; do NOT re-emit end_round from client
+      // unless your server protocol specifically requires it.
+    };
 
-    socket.on('game_over', (data: any) => {
+    const onGameOver = (data: any) => {
+      clearTimer();
       navigate(`/results/${roomCode}`, { state: { gameData: data } });
-    });
+    };
+
+    socket.on('game_started', onGameStarted);
+    socket.on('word_selected', onWordSelected);
+    socket.on('draw_data', onDrawData);
+    socket.on('canvas_cleared', onCanvasCleared);
+    socket.on('stroke_undone', onStrokeUndone);
+    socket.on('correct_guess', onCorrectGuess);
+    socket.on('round_end', onRoundEnd);
+    socket.on('game_over', onGameOver);
 
     return () => {
-      socket.off('game_started');
-      socket.off('word_selected');
-      socket.off('draw_data');
-      socket.off('canvas_cleared');
-      socket.off('stroke_undone');
-      socket.off('correct_guess');
-      socket.off('round_end');
-      socket.off('game_over');
+      socket.off('game_started', onGameStarted);
+      socket.off('word_selected', onWordSelected);
+      socket.off('draw_data', onDrawData);
+      socket.off('canvas_cleared', onCanvasCleared);
+      socket.off('stroke_undone', onStrokeUndone);
+      socket.off('correct_guess', onCorrectGuess);
+      socket.off('round_end', onRoundEnd);
+      socket.off('game_over', onGameOver);
+      clearTimer();
     };
   }, [socket, navigate, roomCode]);
 
-  const startRoundTimer = (duration: number) => {
-    let remaining = duration;
-    const interval = setInterval(() => {
-      remaining--;
-      setTimeLeft(remaining);
-      if (remaining <= 0) {
-        clearInterval(interval);
-        handleEndRound();
-      }
-    }, 1000);
-  };
-
+  // ---- Actions ----
   const handleSelectWord = (word: string) => {
     socket.emit('select_word', { roomCode, word }, (response: any) => {
-      if (response.success) {
-        setSelectedWord(word);
-      }
+      if (response?.success) setSelectedWord(word);
     });
   };
 
@@ -130,41 +184,41 @@ export const Game: React.FC = () => {
 
   const handleSubmitGuess = () => {
     if (!message.trim()) return;
-
+    const guess = message;
+    setMessage('');
     socket.emit(
       'submit_guess',
-      { roomCode, guess: message },
+      { roomCode, guess },
       (response: any) => {
         setMessages(prev => [
           ...prev,
           {
-            type: response.isCorrect ? 'correct' : 'guess',
-            text: message,
+            type: response?.isCorrect ? 'correct' : 'guess',
+            text: guess,
             isYou: true,
           },
         ]);
-        setMessage('');
       }
     );
   };
 
-  const handleEndRound = () => {
-    socket.emit('end_round', { roomCode });
-  };
-
+  // ---- Render ----
   if (!gameState) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center">
         <div className="text-white text-center">
-          <div className="animate-spin mb-4">⏳</div>
+          <div className="animate-spin mb-4 text-4xl">⏳</div>
           <p className="text-xl">Loading game...</p>
+          <p className="text-sm mt-2 opacity-80">
+            If this takes too long, the game may have ended.
+          </p>
         </div>
       </div>
     );
   }
 
-  const isDrawer = gameState.players[gameState.currentDrawerIndex].id === socket.id;
   const currentDrawer = gameState.players[gameState.currentDrawerIndex];
+  const isDrawer = currentDrawer?.id === socket.id;
 
   return (
     <div className="min-h-screen bg-gray-100 p-4">
@@ -178,12 +232,14 @@ export const Game: React.FC = () => {
             <div className="text-right">
               <p className="text-sm text-gray-600">Drawer:</p>
               <p className="text-lg font-semibold text-indigo-600">
-                {currentDrawer.name} {isDrawer && '(You)'}
+                {currentDrawer?.name} {isDrawer && '(You)'}
               </p>
             </div>
           </div>
           <div className="flex items-center justify-between">
-            <div className="text-3xl font-bold text-red-600">{Math.ceil(timeLeft)}s</div>
+            <div className="text-3xl font-bold text-red-600">
+              {Math.max(0, Math.ceil(timeLeft))}s
+            </div>
             <div className="text-lg font-semibold text-gray-800">
               {gameState.wordHint || 'Waiting for word...'}
             </div>
@@ -199,7 +255,7 @@ export const Game: React.FC = () => {
                   Choose a Word
                 </h2>
                 <div className="grid grid-cols-1 gap-3">
-                  {gameState.wordOptions.map((word, idx) => (
+                  {(gameState.wordOptions || []).map((word, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSelectWord(word)}
@@ -216,7 +272,7 @@ export const Game: React.FC = () => {
                 onStroke={handleStroke}
                 onClear={handleClear}
                 onUndo={handleUndo}
-                drawingData={gameState.drawingData}
+                drawingData={gameState.drawingData || []}
               />
             )}
           </div>
@@ -230,13 +286,23 @@ export const Game: React.FC = () => {
                 {[...gameState.players]
                   .sort((a, b) => b.score - a.score)
                   .map((player, idx) => (
-                    <div key={player.id} className="flex items-center justify-between">
+                    <div
+                      key={player.id}
+                      className="flex items-center justify-between"
+                    >
                       <div className="flex-1">
                         <p className="text-sm font-medium text-gray-800">
                           {idx + 1}. {player.name}
+                          {player.id === socket.id && (
+                            <span className="ml-1 text-xs text-gray-500">
+                              (You)
+                            </span>
+                          )}
                         </p>
                       </div>
-                      <span className="font-bold text-indigo-600">{player.score}</span>
+                      <span className="font-bold text-indigo-600">
+                        {player.score}
+                      </span>
                     </div>
                   ))}
               </div>
@@ -249,13 +315,20 @@ export const Game: React.FC = () => {
                 {messages.map((msg, idx) => (
                   <div key={idx} className="text-gray-700">
                     {msg.type === 'system' && (
-                      <p className="text-yellow-700 font-semibold">{msg.text}</p>
+                      <p className="text-yellow-700 font-semibold">
+                        {msg.text}
+                      </p>
                     )}
                     {msg.type === 'correct' && (
                       <p className="text-green-700 font-bold">✓ {msg.text}</p>
                     )}
                     {msg.type === 'guess' && (
-                      <p className={msg.isYou ? 'text-blue-700' : 'text-gray-700'}>
+                      <p
+                        className={
+                          msg.isYou ? 'text-blue-700 font-medium' : 'text-gray-700'
+                        }
+                      >
+                        {msg.isYou ? 'You: ' : ''}
                         {msg.text}
                       </p>
                     )}
@@ -269,7 +342,7 @@ export const Game: React.FC = () => {
                     type="text"
                     value={message}
                     onChange={e => setMessage(e.target.value)}
-                    onKeyPress={e => e.key === 'Enter' && handleSubmitGuess()}
+                    onKeyDown={e => e.key === 'Enter' && handleSubmitGuess()}
                     placeholder="Type your guess..."
                     className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
                   />
