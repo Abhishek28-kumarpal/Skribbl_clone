@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useSearchParams } from 'react-router-dom';
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { getSocket } from './services/socket';
 import { Home } from './pages/Home';
 import { CreateRoom } from './pages/CreateRoom';
@@ -8,8 +8,6 @@ import { Game } from './pages/Game';
 import { Results } from './pages/Results';
 
 function AppContent() {
-  const [searchParams] = useSearchParams();
-  const code = searchParams.get('code');
 
   useEffect(() => {
     getSocket();

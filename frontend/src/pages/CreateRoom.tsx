@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { getSocket } from '../services/socket';
+// import { getSocket } from '../services/socket';
 import { Copy, Check } from 'lucide-react';
 
 export const CreateRoom: React.FC = () => {
   const { roomCode } = useParams();
   const navigate = useNavigate();
-  const socket = getSocket();
+  // const socket = getSocket();
   const [copied, setCopied] = useState(false);
   const [settings, setSettings] = useState({
     maxPlayers: 8,

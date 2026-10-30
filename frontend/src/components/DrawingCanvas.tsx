@@ -82,7 +82,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     ctx.stroke();
   };
 
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = () => {
     if (!isDrawer) return;
     setIsDrawing(true);
   };
@@ -117,7 +117,7 @@ export const DrawingCanvas: React.FC<DrawingCanvasProps> = ({
     setIsDrawing(false);
   };
 
-  const handleTouchStart = (e: React.TouchEvent) => {
+  const handleTouchStart = () => {
     if (!isDrawer) return;
     setIsDrawing(true);
   };

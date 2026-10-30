@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { getSocket } from '../services/socket';
 import { DrawingCanvas } from '../components/DrawingCanvas';
-import { GameState, Player } from '../types';
+import { GameState } from '../types';
 
 export const Game: React.FC = () => {
   const { roomCode } = useParams();
@@ -11,7 +11,7 @@ export const Game: React.FC = () => {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [message, setMessage] = useState('');
   const [messages, setMessages] = useState<any[]>([]);
-  const [selectedWord, setSelectedWord] = useState('');
+  const [, setSelectedWord] = useState('');
   const [timeLeft, setTimeLeft] = useState(0);
 
   useEffect(() => {
