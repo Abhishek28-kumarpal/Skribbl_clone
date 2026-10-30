@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import cors from 'cors';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -21,6 +21,7 @@ const allowedOrigins = [
 // Initialize Express
 const app = express();
 const httpServer = createServer(app);
+const roomManager = new RoomManager();
 
 // Socket.IO configuration with proper CORS
 const io = new Server(httpServer, {
@@ -86,7 +87,7 @@ mongoose
   });
 
 // Health check API
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -96,7 +97,7 @@ app.get('/health', (req, res) => {
 });
 
 // Game statistics API
-app.get('/api/stats', (req, res) => {
+app.get('/api/stats', (_req, res) => {
   res.json({
     activeRooms: roomManager.getRoomCount(),
     activeGames: roomManager.getActiveGames(),
@@ -108,13 +109,13 @@ app.get('/api/stats', (req, res) => {
 setupSocketHandlers(io, roomManager);
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error('Error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
 // 404 handler
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
