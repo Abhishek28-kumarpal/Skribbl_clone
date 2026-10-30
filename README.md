@@ -115,7 +115,7 @@ cd frontend
 npm install
 
 # Create .env.local (optional - defaults to http://localhost:5000)
-echo "VITE_BACKEND_URL=http://localhost:5000" > .env.local
+echo "VITE_SERVER_URL=https://skribbl-clone-d2z8.onrender.com" > .env.local
 ```
 
 Start the frontend:
@@ -218,7 +218,7 @@ Stores completed game results for statistics and history:
 1. Import project to Vercel
 2. Set environment variable:
    ```
-   VITE_BACKEND_URL=https://your-backend-url.onrender.com
+   VITE_SERVER_URL=https://skribbl-clone-d2z8.onrender.com
    ```
 3. Deploy
 
@@ -234,7 +234,7 @@ NODE_ENV=development
 
 ### Frontend (.env.local)
 ```
-VITE_BACKEND_URL=http://localhost:5000
+VITE_SERVER_URL=https://skribbl-clone-d2z8.onrender.com
 ```
 
 ## Game Flow & Scoring
