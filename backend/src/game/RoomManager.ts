@@ -1,5 +1,5 @@
-import { Room } from './Room.js';
-import { Player, RoomSettings } from '../types/index.js';
+import { Room } from './Room.ts';
+import type { Player, RoomSettings } from '../types/index.ts';
 
 export class RoomManager {
   private rooms: Map<string, Room>;

@@ -1,5 +1,5 @@
-import { Player, RoomSettings } from '../types/index.js';
-import { Game } from './Game.js';
+import type { Player, RoomSettings } from '../types/index.ts';
+import { Game } from './Game.ts';
 
 export class Room {
   roomCode: string;

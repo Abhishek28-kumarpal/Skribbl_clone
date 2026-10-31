@@ -1,7 +1,7 @@
 import { Server, Socket } from 'socket.io';
-import { RoomManager } from '../game/RoomManager.js';
-import { Player, RoomSettings, DrawingStroke } from '../types/index.js';
-import { GameResult } from '../models/GameResult.js';
+import { RoomManager } from '../game/RoomManager.ts';
+import type { Player, RoomSettings, DrawingStroke } from '../types/index.ts';
+import { GameResult } from '../models/GameResult.ts';
 
 export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
   io.on('connection', (socket: Socket) => {

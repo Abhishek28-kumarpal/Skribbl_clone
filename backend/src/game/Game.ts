@@ -1,5 +1,10 @@
-import { GameState, Player, RoomSettings, DrawingStroke } from '../types/index.js';
-import { getRandomWords } from '../data/words.js';
+import type {
+  GameState,
+  Player,
+  RoomSettings,
+  DrawingStroke
+} from '../types/index.ts';
+import { getRandomWords } from '../data/words.ts';
 
 export class Game {
   gameState: GameState;

@@ -4,9 +4,11 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { RoomManager } from './game/RoomManager.js';
-import { setupSocketHandlers } from './socket/handlers.js';
+import { RoomManager } from './game/RoomManager.ts';
+import { setupSocketHandlers } from './socket/handlers.ts';
+import dns from 'node:dns';
 
+dns.setServers(['1.1.1.1', '1.0.0.1']);
 dotenv.config();
 
 // Allowed frontend origins - ADD ALL YOUR DEPLOYED URLS
@@ -15,7 +17,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://skribbl-clone-d2z8.onrender.com', // If frontend is also on Render
-  process.env.FRONTEND_URL, // Add from .env
+  process.env.CLIENT_URL, // Add from .env
 ].filter(Boolean); // Remove undefined values
 
 // Initialize Express
