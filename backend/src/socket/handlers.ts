@@ -3,6 +3,55 @@ import { RoomManager } from '../game/RoomManager.ts';
 import type { Player, RoomSettings, DrawingStroke } from '../types/index.ts';
 import { GameResult } from '../models/GameResult.ts';
 
+// Helper function to handle round transitions cleanly
+const advanceToNextRound = (roomCode: string, io: Server, roomManager: RoomManager) => {
+  setTimeout(() => {
+    const currentRoom = roomManager.getRoom(roomCode);
+    if (!currentRoom || !currentRoom.game) return;
+
+    // Prevent double-advancing if phase already changed
+    if (currentRoom.game.gameState.phase !== 'round-end') return;
+
+    currentRoom.game.gameState.currentRound += 1;
+    currentRoom.game.gameState.currentDrawerIndex =
+      (currentRoom.game.gameState.currentDrawerIndex + 1) % currentRoom.game.gameState.players.length;
+
+    if (currentRoom.game.isGameOver()) {
+      currentRoom.game.gameState.phase = 'game-over';
+      const winner = currentRoom.game.getWinner();
+      
+      const gameResult = new GameResult({
+        gameId: currentRoom.game.gameState.gameId,
+        roomCode: currentRoom.roomCode,
+        players: currentRoom.game.gameState.players.map(p => ({
+          name: p.name,
+          finalScore: p.score,
+          guessedCorrect: p.guessedCorrectCount,
+        })),
+        winner: winner.name,
+        totalRounds: currentRoom.game.gameState.totalRounds,
+        settings: currentRoom.game.gameState.settings,
+        endedAt: new Date(),
+      });
+
+      gameResult.save().catch(err => console.error('Error saving game result:', err));
+
+      io.to(roomCode).emit('game_over', {
+        winner: winner.name,
+        players: currentRoom.game.gameState.players,
+        gameState: currentRoom.game.gameState,
+      });
+
+      setTimeout(() => roomManager.deleteRoom(roomCode), 5000);
+    } else {
+      currentRoom.game.startNewRound();
+      io.to(roomCode).emit('new_round_started', {
+        gameState: currentRoom.game.gameState,
+      });
+    }
+  }, 3000); // 3 seconds delay so players can see the result
+};
+
 export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
   io.on('connection', (socket: Socket) => {
     console.log(`Player connected: ${socket.id}`);
@@ -144,6 +193,27 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
+    socket.on('get_game_state', (data, callback) => {
+      try {
+        const { roomCode } = data;
+        const room = roomManager.getRoom(roomCode);
+        
+        if (!room) {
+          callback({ success: false, error: 'Room not found' });
+          return;
+        }
+
+        if (room.game && room.game.gameState) {
+          callback({ success: true, gameState: room.game.gameState });
+        } else {
+          callback({ success: false, error: 'Game not started' });
+        }
+      } catch (error) {
+        console.error('Error getting game state:', error);
+        callback({ success: false, error: 'Failed to get game state' });
+      }
+    });
+
     socket.on('select_word', (data, callback) => {
       try {
         const { roomCode, word } = data;
@@ -165,6 +235,21 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         io.to(roomCode).emit('word_selected', {
           gameState: room.game.gameState,
         });
+
+        // Set timeout to end round if time runs out
+        const drawTimeMs = room.game.gameState.settings.drawTime * 1000;
+        setTimeout(() => {
+          const currentRoom = roomManager.getRoom(roomCode);
+          // Only end round if it's still in the 'drawing' phase (prevents double-triggering)
+          if (currentRoom?.game?.gameState.phase === 'drawing') {
+            currentRoom.game.endRound();
+            io.to(roomCode).emit('round_end', {
+              gameState: currentRoom.game.gameState,
+            });
+            advanceToNextRound(roomCode, io, roomManager);
+          }
+        }, drawTimeMs);
+
       } catch (error) {
         callback({ error: 'Invalid word' });
       }
@@ -238,12 +323,16 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
           const points = Math.max(10, 100 - Math.floor((Date.now() - room.game.gameState.roundStartTime) / 100));
           room.game.recordCorrectGuess(socket.id, points);
 
-          io.to(roomCode).emit('correct_guess', {
-            playerId: socket.id,
-            playerName: room.getPlayer(socket.id)?.name || 'Unknown',
-            word: room.game.gameState.currentWord,
-            players: room.game.gameState.players,
+          // IMMEDIATELY END THE ROUND ON FIRST CORRECT GUESS
+          room.game.endRound();
+
+          // Emit round_end with FULL gameState (reveals word, updates scores for everyone)
+          io.to(roomCode).emit('round_end', {
+            gameState: room.game.gameState,
           });
+
+          // Trigger the next round sequence
+          advanceToNextRound(roomCode, io, roomManager);
         }
 
         callback({ success: true, isCorrect });
@@ -252,46 +341,25 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
       }
     });
 
-    socket.on('end_round', (data) => {
+    socket.on('reveal_hint', (data, callback) => {
       try {
         const { roomCode } = data;
         const room = roomManager.getRoom(roomCode);
         if (!room || !room.game) return;
 
-        room.game.endRound();
-
-        if (room.game.isGameOver()) {
-          const winner = room.game.getWinner();
-          const gameResult = new GameResult({
-            gameId: room.game.gameState.gameId,
-            roomCode: room.roomCode,
-            players: room.game.gameState.players.map(p => ({
-              name: p.name,
-              finalScore: p.score,
-              guessedCorrect: p.guessedCorrectCount,
-            })),
-            winner: winner.name,
-            totalRounds: room.game.gameState.totalRounds,
-            settings: room.game.gameState.settings,
-            endedAt: new Date(),
-          });
-
-          gameResult.save().catch(err => console.error('Error saving game result:', err));
-
-          io.to(roomCode).emit('game_over', {
-            winner: winner.name,
-            players: room.game.gameState.players,
-            gameState: room.game.gameState,
-          });
-
-          setTimeout(() => roomManager.deleteRoom(roomCode), 5000);
-        } else {
-          io.to(roomCode).emit('round_end', {
-            gameState: room.game.gameState,
-          });
+        const drawer = room.game.getCurrentDrawer();
+        if (!drawer || drawer.id !== socket.id) {
+          callback({ error: 'Only drawer can reveal hints' });
+          return;
         }
+
+        room.game.revealHint();
+        io.to(roomCode).emit('hint_revealed', {
+          gameState: room.game.gameState,
+        });
+        callback({ success: true });
       } catch (error) {
-        console.error('Error ending round:', error);
+        callback({ error: 'Failed to reveal hint' });
       }
     });
 

@@ -38,7 +38,6 @@ export class Game {
   }
 
   startGame(): void {
-    this.gameState.phase = 'word-selection';
     this.gameState.currentRound = 1;
     this.gameState.currentDrawerIndex = 0;
     this.startNewRound();
@@ -55,6 +54,8 @@ export class Game {
     this.gameState.playersWhoGuessedCorrect = new Set();
     this.gameState.currentWord = '';
     this.gameState.wordHint = '';
+    this.gameState.roundStartTime = 0;
+    this.gameState.roundEndTime = 0;
     this.gameState.wordOptions = getRandomWords(this.gameState.settings.wordCount);
   }
 
@@ -80,6 +81,10 @@ export class Game {
       }
     }
     this.gameState.wordHint = hint;
+  }
+
+  revealHint(): void {
+    this.revealLetters(1);
   }
 
   revealLetters(count: number): void {
@@ -136,9 +141,8 @@ export class Game {
 
   endRound(): void {
     this.gameState.phase = 'round-end';
-    this.gameState.currentRound += 1;
-    this.gameState.currentDrawerIndex =
-      (this.gameState.currentDrawerIndex + 1) % this.gameState.players.length;
+    // REVEAL THE FULL WORD WHEN ROUND ENDS
+    this.gameState.wordHint = this.gameState.currentWord;
   }
 
   getWinner(): Player {
